@@ -8,11 +8,17 @@ class Retraction
   xml_accessor :post_guid
   xml_accessor :diaspora_handle
   xml_accessor :type
-
   attr_accessor :person, :object, :subscribers
 
+  validates :target, :presence => true
+  validate :sender_is_the_one_being_retracted, :if => :person_retraction?
+  validate :retractor_controls_target, :unless => :person_retraction?
+
+  #FEDERATION HAX
+  alias :author :person
+
   def subscribers(user)
-    unless self.type == 'Person'
+    unless person_retraction?
       @subscribers ||= self.object.subscribers(user)
       @subscribers -= self.object.resharers unless self.object.is_a?(Photo)
       @subscribers
@@ -48,17 +54,31 @@ class Retraction
   end
 
   def receive(user, person)
-    if self.type == 'Person'
-      unless self.person.guid.to_s == self.post_guid.to_s
-        Rails.logger.info("event=receive status=abort reason='sender is not the person he is trying to retract' recipient=#{self.diaspora_handle} sender=#{self.person.diaspora_handle} payload_type=#{self.class} retraction_type=person")
-        return
-      end
+    if person_retraction?
       user.disconnected_by(self.target)
-    elsif self.target.nil? || self.target.author != self.person
-      Rails.logger.info("event=retraction status=abort reason='no post found authored by retractor' sender=#{person.diaspora_handle} post_guid=#{post_guid}")
     else
       self.perform(user)
     end
     self
   end
+
+  def person_retraction?
+    self.type == 'Person'
+  end
+
+  def sender_is_the_one_being_retracted
+    unless self.person.guid.to_s == self.post_guid.to_s
+      Rails.logger.info("event=receive status=abort reason='sender is not the person he is trying to retract' recipient=#{self.diaspora_handle} sender=#{self.person.diaspora_handle} payload_type=#{self.class} retraction_type=person")
+      errors.add :base, "Retractor does not control target"
+    end
+  end
+
+  def retractor_controls_target
+    unless self.target.present? && self.target.author == self.person
+      Rails.logger.info("event=retraction status=abort reason='no post found authored by retractor' sender=#{person.diaspora_handle} post_guid=#{post_guid}")
+      errors.add :base, "Retractor does not control target"
+    end
+  end
+  
+  include Diaspora::Federated::Lint # unless Rails.env.production?
 end

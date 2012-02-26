@@ -5,59 +5,13 @@
 require 'spec_helper'
 
 
-def receive(post, opts)
-  sender = opts.fetch(:from)
-  receiver = opts.fetch(:by)
-  salmon_xml = sender.salmon(post).xml_for(receiver.person)
-  zord = Postzord::Receiver::Private.new(receiver, :salmon_xml => salmon_xml)
-  zord.perform!
-end
-
-def temporary_user(&block)
-  user = Factory(:user)
-  block_return_value = yield user
-  user.delete
-  block_return_value
-end
-
-def temporary_post(user, &block)
-  temp_post = user.post(:status_message, :text => 'hi')
-  block_return_value = yield temp_post
-  temp_post.delete
-  block_return_value
-end
-
-def expect_error(partial_message, &block)
-  begin 
-    yield
-  rescue => e
-    e.message.should match partial_message
-  end
-end
-
-def bogus_retraction(&block)
-  ret = Retraction.new
-  yield ret
-  ret
-end
-
-def user_should_not_see_guid(user, guid)
- user.reload.visible_shareables(Post).where(:guid => guid).should be_blank
-end
-    #returns the message
-def legit_post_from_user1_to_user2(user1, user2)
-  original_message = user1.post(:status_message, :text => 'store this!', :to => user1.aspects.find_by_name("generic").id)
-  receive(original_message, :from => user1, :by => user2)
-  original_message
-end
-
 describe "attack vectors" do
+  include FederationIntegrationHelper
 
   let(:eves_aspect) { eve.aspects.find_by_name("generic") }
   let(:alices_aspect) { alice.aspects.find_by_name("generic") }
 
   context "testing side effects of validation phase" do
-
     describe 'Contact Required Unless Request' do
       #CUSTOM SETUP; cant use helpers here
       it 'does not save a post from a non-contact as a side effect' do
@@ -114,7 +68,7 @@ describe "attack vectors" do
         profile.first_name = "Not BOB"
 
         expect {
-          expect_error /Author does not match XML author/ do
+          expect_error /Message sent from someone who does not have write access to the object/ do
             receive(profile, :from => alice, :by => bob)
           end
         }.should_not change(eve.profile, :first_name) 
@@ -122,7 +76,90 @@ describe "attack vectors" do
     end
   end
 
+  context 'around retractions' do
+    it "(1 of 2) ignores INTACT retractions sent by someone other than retraction author" do
+      #alice can not retract eves message with eves retraction
+      original_message = legit_post_from_user1_to_user2(eve, bob)
 
+      ret = bogus_retraction do |retraction| 
+        retraction.post_guid = original_message.guid
+        retraction.diaspora_handle = eve.person.diaspora_handle
+        retraction.type = original_message.class.to_s
+      end
+
+      expect {
+        expect_error /Message sent from someone who does not have write access to the object/ do
+          receive(ret, :from => alice, :by => bob)
+        end
+      }.should_not change(StatusMessage, :count)
+    end
+
+    #NOTE:  THIS VALIDATION IS SAVED BY SOME MODEL LEVEL VALIDATION :()
+    it '(2 of 2) ignores retractions generated for posts that the retractor does not own' do
+      #alice can not retract eves message with alice's
+
+      original_message = legit_post_from_user1_to_user2(eve, bob)
+
+      retraction = bogus_retraction do |ret|
+        ret.post_guid = original_message.guid
+        ret.diaspora_handle = alice.person.diaspora_handle
+        ret.type = original_message.class.to_s
+      end
+
+      expect {
+          expect_error /Retractor does not control target/ do
+            receive(retraction, :from => alice, :by => bob)
+          end
+      }.should_not change(StatusMessage, :count)
+    end
+
+    it "complains loudly when you send a retraction with no target" do
+      bogus_retraction = temporary_post(eve) do |original_message|
+                            bogus_retraction do |ret|
+                              ret.post_guid = original_message.guid
+                              ret.diaspora_handle = alice.person.diaspora_handle
+                              ret.type = original_message.class.to_s
+                            end
+                          end
+       expect{
+        receive(bogus_retraction, :from => alice, :by => bob)
+      }.should raise_error
+    end
+
+
+
+    it 'it should not allow you unfriend other users' do
+      #we are banking on bob being friends with alice and eve
+      #here, alice is trying to disconnect bob and eve
+
+      retraction = bogus_retraction do |ret|
+        ret.post_guid = eve.person.guid
+        ret.diaspora_handle = alice.person.diaspora_handle
+        ret.type = eve.person.class.to_s
+      end
+
+      expect{
+        expect_error /Retractor does not control target/ do
+          receive(retraction, :from => alice, :by => bob)
+        end
+      }.should_not change{bob.reload.contacts.count}
+    end
+
+    it 'it should not allow you to send retractions with xml and salmon handle mismatch' do
+      retraction = bogus_retraction do |ret|
+        ret.post_guid = eve.person.guid
+        ret.diaspora_handle = eve.person.diaspora_handle
+        ret.type = eve.person.class.to_s
+      end
+
+      expect{
+        expect_error /Message sent from someone who does not have write access to the object/ do
+          receive(retraction, :from => alice, :by => bob)
+        end
+        }.should_not change(bob.contacts, :count)
+    end
+
+  end
 
   context 'malicious contact attack vector' do
     describe 'mass assignment on id' do
@@ -153,81 +190,11 @@ describe "attack vectors" do
     end
 
 
-    it "ignores retractions on a post not owned by the retraction's sender" do
-      original_message = legit_post_from_user1_to_user2(eve, bob)
-
-      ret = bogus_retraction do |retraction| 
-        retraction.post_guid = original_message.guid
-        retraction.diaspora_handle = alice.person.diaspora_handle
-        retraction.type = original_message.class.to_s
-      end
-
-      expect {
-        receive(ret, :from => alice, :by => bob)
-      }.should_not change(StatusMessage, :count)
-    end
-
-    it "silently disregards retractions for non-existent posts(that are from someone other than the post's author)" do
-      bogus_retraction = temporary_post(eve) do |original_message|
-                            bogus_retraction do |ret|
-                              ret.post_guid = original_message.guid
-                              ret.diaspora_handle = alice.person.diaspora_handle
-                              ret.type = original_message.class.to_s
-                            end
-                          end
-       expect{
-        receive(bogus_retraction, :from => alice, :by => bob)
-      }.should_not raise_error
-    end
-
-    it 'should not receive retractions where the retractor and the salmon author do not match' do
-      original_message = legit_post_from_user1_to_user2(eve, bob)
-
-      retraction = bogus_retraction do |ret|
-        ret.post_guid = original_message.guid
-        ret.diaspora_handle = eve.person.diaspora_handle
-        ret.type = original_message.class.to_s
-      end
-
-      expect {
-        expect_error /Author does not match XML author/  do
-          receive(retraction, :from => alice, :by => bob)
-        end
-      }.should_not change(bob.visible_shareables(Post), :count)
-
-    end
-
-    it 'it should not allow you to send retractions for other people' do
-      #we are banking on bob being friends with alice and eve
-      #here, alice is trying to disconnect bob and eve
-
-      retraction = bogus_retraction do |ret|
-        ret.post_guid = eve.person.guid
-        ret.diaspora_handle = alice.person.diaspora_handle
-        ret.type = eve.person.class.to_s
-      end
-
-      expect{
-        receive(retraction, :from => alice, :by => bob)
-      }.should_not change{bob.reload.contacts.count}
-    end
-
-    it 'it should not allow you to send retractions with xml and salmon handle mismatch' do
-      retraction = bogus_retraction do |ret|
-        ret.post_guid = eve.person.guid
-        ret.diaspora_handle = eve.person.diaspora_handle
-        ret.type = eve.person.class.to_s
-      end
-
-      expect{
-        expect_error /Author does not match XML author/ do
-          receive(retraction, :from => alice, :by => bob)
-        end
-        }.should_not change(bob.contacts, :count)
-    end
+ 
 
     it 'does not let another user update other persons post' do
-      original_message = eve.post(:photo, :user_file => uploaded_photo, :text => "store this!", :to => eves_aspect.id)
+      original_message = eve.build_post(:photo, :user_file => uploaded_photo, :text => "store this!", :to => eves_aspect.id)
+
       receive(original_message, :from => eve, :by => bob)
 
       #is this testing two things?

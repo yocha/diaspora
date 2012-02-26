@@ -69,7 +69,8 @@ module Diaspora
             user.people_in_aspects(user.aspects_with_shareable(self.class, self.id))
           end
         end
-         protected
+        
+        protected
 
         # @return [Shareable,void]
         def persisted_shareable
@@ -92,7 +93,7 @@ module Diaspora
               false
             end
           else
-            user.contact_for(person).receive_shareable(local_shareable)
+            create_share_visibility_for_contact(user, person, local_shareable)
             user.notify_if_mentioned(local_shareable)
             Rails.logger.info("event=receive payload_type=#{self.class} update=true status=complete sender=#{self.diaspora_handle}") #existing_shareable=#{local_shareable.id}")
             true
@@ -101,13 +102,19 @@ module Diaspora
 
         def receive_non_persisted(user, person)
           if self.save
-            user.contact_for(person).receive_shareable(self)
+            create_share_visibility_for_contact(user, person, self)
             user.notify_if_mentioned(self)
             Rails.logger.info("event=receive payload_type=#{self.class} update=false status=complete sender=#{self.diaspora_handle}")
             true
           else
             Rails.logger.info("event=receive payload_type=#{self.class} update=false status=abort sender=#{self.diaspora_handle} reason=#{self.errors.full_messages}")
             false
+          end
+        end
+
+        def create_share_visibility_for_contact(user, person, shareable)
+          if contact = user.contact_for(person)
+            contact.receive_shareable(shareable)
           end
         end
       end

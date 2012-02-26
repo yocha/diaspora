@@ -5,6 +5,7 @@
 require 'spec_helper'
 
 describe 'a user receives a post' do
+  include FederationIntegrationHelper
 
   def receive_with_zord(user, person, xml)
     zord = Postzord::Receiver::Private.new(user, :person => person)
@@ -279,16 +280,15 @@ describe 'a user receives a post' do
 
 
   describe 'salmon' do
-    let(:post){alice.post :status_message, :text => "hello", :to => @alices_aspect.id}
-    let(:salmon){alice.salmon( post )}
-
     it 'processes a salmon for a post' do
-      salmon_xml = salmon.xml_for(bob.person)
+      salmon_xml = temporary_post(alice) do |post|
+                      alice.salmon(post).xml_for(bob.person)
+                    end
 
-      zord = Postzord::Receiver::Private.new(bob, :salmon_xml => salmon_xml)
-      zord.perform!
-
-      bob.visible_shareables(Post).include?(post).should be_true
+      expect{
+        zord = Postzord::Receiver::Private.new(bob, :salmon_xml => salmon_xml)
+        zord.perform!
+      }.to change(Post, :count).by(1)
     end
   end
 

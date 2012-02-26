@@ -78,7 +78,7 @@ describe Postzord::Receiver::Private do
     end
 
     it 'calls Notification.notify if object responds to notification_type' do
-      cm = Comment.new
+      cm = Factory(:comment, :author => alice.person)
       cm.stub(:receive).and_return(cm)
 
       Notification.should_receive(:notify).with(bob, cm, alice.person)

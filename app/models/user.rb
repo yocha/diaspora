@@ -265,7 +265,9 @@ class User < ActiveRecord::Base
     opts[:diaspora_handle] = opts[:author].diaspora_handle
 
     model_class = class_name.to_s.camelize.constantize
-    model_class.diaspora_initialize(opts)
+    object = model_class.diaspora_initialize(opts)
+    object.set_guid
+    object
   end
 
   def dispatch_post(post, opts={})

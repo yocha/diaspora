@@ -6,7 +6,7 @@ module Diaspora::Guid
     model.class_eval do
       before_create :set_guid
       xml_attr :guid
-      validates :guid, :uniqueness => true
+      validates :guid, :uniqueness => true#, :presence => true
 
     end
   end

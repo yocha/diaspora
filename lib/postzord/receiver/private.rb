@@ -1,123 +1,94 @@
-#   Copyright (c) 2010-2011, Diaspora Inc.  This file is
+  #   Copyright (c) 2010-2011, Diaspora Inc.  This file is
 #   licensed under the Affero General Public License version 3 or later.  See
 #   the COPYRIGHT file.
-
 require File.join(Rails.root, 'lib/webfinger')
-require File.join(Rails.root, 'lib/diaspora/parser')
+require File.join(Rails.root, 'lib/diaspora/federated/parser')
+require File.join(Rails.root, 'lib/diaspora/federated/validator/private')
 
+
+
+#there are three phases of this object
+# 1. accept xml
+# 2. validate and emit the object
+# 3. recieve the object by the user
+# 4. post recieve callbacks
+# 
+# currently, there are two gross ways into this object, one which takes encrypted xml,
+# and another which takes an object directly
+
+class Postzord::Receiver::PrivateLocal
+
+end
+
+
+#note, two code paths to extract here :/
+# decent federation case 1. call with salmon_xml from federation request, and call receive
+# bad internal case: 2. with non salmonified xml (this is because requests and retractions are not persisted, but still unique to individuals)
+# bad internal case: 3: with an object instance directly, which is for persisted objects, but same reasoning as above.
 class Postzord::Receiver::Private < Postzord::Receiver
+  attr_accessor :object, :user, :sender, :salmon, :salmon_xml
 
   def initialize(user, opts={})
-    @user = user
-    @user_person = @user.person
-    @salmon_xml = opts[:salmon_xml]
-
-    @sender = opts[:person] || Webfinger.new(self.salmon.author_id).fetch
-    @author = @sender
-
-    @object = opts[:object]
+    self.user = user
+    self.salmon_xml = opts[:salmon_xml]
+    self.sender = opts[:person] || Webfinger.new(self.salmon.author_id).fetch
+    @actor = @sender
+    self.object = opts[:object]
   end
 
+
+  #called from xml provided by the outside world
   def receive!
-    begin 
-      if @sender && self.salmon.verified_for_key?(@sender.public_key)
-        parse_and_receive(salmon.parsed_data)
-      else
-        FEDERATION_LOGGER.info("event=receive status=abort recipient=#{@user.diaspora_handle} sender=#{@salmon.author_id} reason='not_verified for key'")
-        false
-      end
-    rescue => e
-      #this sucks
-      FEDERATION_LOGGER.info("Failure to receive #{@object.inspect} for sender:#{@sender.id} for user:#{@user.id}: #{e.message}")
-      raise e
-    end
-  end
-
-  def parse_and_receive(xml)
-    @object ||= Diaspora::Parser.from_xml(xml)
-    return  if @object.nil?
-
-    FEDERATION_LOGGER.info("user:#{@user.id} starting private receive from person:#{@sender.guid}")
-
-    if self.validate_object
-      set_author!
-      receive_object
-      FEDERATION_LOGGER.info("object received #{@object.class}")
+    validator = Diaspora::Federated::Validator::Private.new(self.salmon, @user, @sender)
+    if self.object = validator.process! #this should raise
+      refreshed_object = accept_object_for_user #this SHOULD emit an instance of the object if it already exists, or itself
+      post_receive_hooks(refreshed_object)
     else
-      FEDERATION_LOGGER.info("failed to receive object from #{@object.author}: #{@object.inspect}")
-      raise "not a valid object:#{@object.inspect}"
+      FEDERATION_LOGGER.info("failed to receive object: #{validator.errors.inspect}")
+      false
     end
   end
+
+  #called from local code paths only, so we dont need to do all the validation checks
+  def parse_and_receive(xml)
+    self.object = create_object_from_local(xml)
+    receive_object
+ end
+
+  #this is a method to get the tests to pass
+  # it is used where we manaully pass an already parsed object into be received
+  def receive_object
+    obj = accept_object_for_user
+    post_receive_hooks(obj)
+  end
+
 
   # @return [Object]
-  def receive_object
-    obj = @object.receive(@user, @author)
-    Notification.notify(@user, obj, @author) if obj.respond_to?(:notification_type)
+  def accept_object_for_user
+    obj = object.receive(@user, object.author)
     FEDERATION_LOGGER.info("user:#{@user.id} successfully received private post from person#{@sender.guid} #{@object.inspect}")
     obj
   end
 
+  def post_receive_hooks(obj)
+    notify_receiver(obj)
+  end
+
   protected
+
+  def create_object_from_local(xml)
+     Diaspora::Federated::Parser.new(xml, @sender).parse!
+  end
+
   def salmon
     @salmon ||= Salmon::EncryptedSlap.from_xml(@salmon_xml, @user)
   end
 
-  def xml_author
-    if @object.respond_to?(:relayable?)
-      #if A and B are friends, and A sends B a comment from C, we delegate the validation to the owner of the post being commented on
-      xml_author = @user.owns?(@object.parent) ? @object.diaspora_handle : @object.parent.author.diaspora_handle
-      @author = Webfinger.new(@object.diaspora_handle).fetch if @object.author
+  def notify_receiver(obj)
+    if obj.respond_to?(:notification_type)
+      Notification.notify(@user, obj, @object.author) 
     else
-      xml_author = @object.diaspora_handle
-    end
-    xml_author
-  end
-
-  def validate_object
-    raise "Contact required unless request" if contact_required_unless_request
-    raise "Relayable object, but no parent object found" if relayable_without_parent?
-
-    assign_sender_handle_if_request
-
-    raise "Author does not match XML author" if author_does_not_match_xml_author?
-
-    @object
-  end
-
-  def set_author!
-    return unless @author
-    @object.author = @author if @object.respond_to? :author=
-    @object.person = @author if @object.respond_to? :person=
-  end
-
-  private
-
-  #validations
-  def relayable_without_parent?
-    if @object.respond_to?(:relayable?) && @object.parent.nil?
-      FEDERATION_LOGGER.info("event=receive status=abort reason='received a comment but no corresponding post' recipient=#{@user_person.diaspora_handle} sender=#{@sender.diaspora_handle} payload_type=#{@object.class})")
-      return true
-    end
-  end
-
-  def author_does_not_match_xml_author?
-    if (@author.diaspora_handle != xml_author)
-      FEDERATION_LOGGER.info("event=receive status=abort reason='author in xml does not match retrieved person' payload_type=#{@object.class} recipient=#{@user_person.diaspora_handle} sender=#{@sender.diaspora_handle}")
-      return true
-    end
-  end
-
-  def contact_required_unless_request
-    unless @object.is_a?(Request) || @user.contact_for(@sender)
-      FEDERATION_LOGGER.info("event=receive status=abort reason='sender not connected to recipient' recipient=#{@user_person.diaspora_handle} sender=#{@sender.diaspora_handle}")
-      return true 
-    end
-  end
-
-  def assign_sender_handle_if_request
-    #special casey
-    if @object.is_a?(Request)
-      @object.sender_handle = @sender.diaspora_handle
+      FEDERATION_LOGGER.info("WARNING: object #{obj.inspect}: did not respond_t0 notification_type")
     end
   end
 end

@@ -17,17 +17,26 @@ module Diaspora
       def self.included(model)
         model.instance_eval do
           include ROXML
+          include ActiveModel::Validations
+            
           include Diaspora::Federated::Base::InstanceMethods
+
+          #requires author
         end
       end
 
       module InstanceMethods
         def to_diaspora_xml
           <<-XML
-          <XML>
-          <post>#{to_xml.to_s}</post>
-          </XML>
-    XML
+            <XML>
+            <post>#{to_xml.to_s}</post>
+            </XML>
+          XML
+        end
+
+        def author
+
+          raise 'You must override author in order to enable federation on this model'
         end
 
         def x(input)
