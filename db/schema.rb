@@ -11,7 +11,7 @@
 #
 # It's strongly recommended to check this file into your version control system.
 
-ActiveRecord::Schema.define(:version => 20120420185823) do
+ActiveRecord::Schema.define(:version => 20120422072257) do
 
   create_table "account_deletions", :force => true do |t|
     t.string  "diaspora_handle"
@@ -150,6 +150,15 @@ ActiveRecord::Schema.define(:version => 20120420185823) do
   add_index "likes", ["guid"], :name => "index_likes_on_guid", :unique => true
   add_index "likes", ["target_id", "author_id", "target_type"], :name => "index_likes_on_target_id_and_author_id_and_target_type", :unique => true
   add_index "likes", ["target_id"], :name => "index_likes_on_post_id"
+
+  create_table "locations", :force => true do |t|
+    t.string   "address"
+    t.string   "lat"
+    t.string   "lng"
+    t.integer  "status_message_id"
+    t.datetime "created_at"
+    t.datetime "updated_at"
+  end
 
   create_table "mentions", :force => true do |t|
     t.integer "post_id",   :null => false
@@ -340,6 +349,7 @@ ActiveRecord::Schema.define(:version => 20120420185823) do
     t.integer  "reshares_count",                      :default => 0
     t.datetime "interacted_at"
     t.string   "frame_name"
+    t.boolean  "fav",                                 :default => false
   end
 
   add_index "posts", ["author_id", "root_guid"], :name => "index_posts_on_author_id_and_root_guid", :unique => true
