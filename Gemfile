@@ -97,7 +97,7 @@ gem 'acts-as-taggable-on', '~> 2.2.2'
 
 # URIs and HTTP
 
-gem 'addressable', '2.2.4', :require => 'addressable/uri'
+gem 'addressable', '~> 2.2', :require => 'addressable/uri'
 gem 'http_accept_language', '~> 1.0.2'
 gem 'typhoeus'
 
@@ -148,7 +148,7 @@ group :test do
   gem 'capybara', '~> 1.1.2'
   gem 'cucumber-rails', '1.3.0', :require => false
   gem 'database_cleaner', '0.7.1'
-  gem 'diaspora-client', :git => 'git://github.com/diaspora/diaspora-client.git'
+  # gem 'diaspora-client', :git => 'git://github.com/diaspora/diaspora-client.git'
 
   gem 'timecop'
                           #"0.1.0", #:path => '~/workspace/diaspora-client'
@@ -162,7 +162,7 @@ group :test do
   gem "rspec-rails", "~> 2.9.0" 
   gem 'selenium-webdriver', '2.22.0.rc1'
 
-  gem 'webmock', :require => false
+  gem 'webmock', '~> 1.7', :require => false
   gem 'sqlite3'
   gem 'mock_redis'
 
