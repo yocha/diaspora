@@ -50,7 +50,7 @@ gem 'unicorn'
 gem 'capistrano'
 
 group :heroku do
-  gem 'pg'
+  #gem 'pg'
   #gem 'unicorn', '~> 4.3.0', :require => false
 end
 
