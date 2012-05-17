@@ -331,7 +331,6 @@ GEM
     parallel (0.5.16)
     parallel_tests (0.8.1)
       parallel
-    pg (0.13.2)
     polyglot (0.3.3)
     rack (1.4.1)
     rack-cache (1.2)
@@ -557,7 +556,6 @@ DEPENDENCIES
   omniauth-tumblr
   omniauth-twitter
   parallel_tests
-  pg
   rack-cors (~> 0.2.4)
   rack-piwik
   rack-rewrite (~> 1.2.1)
