@@ -90,6 +90,7 @@ gem 'resque', '1.20.0'
 gem 'resque-timeout', '1.0.0'
 gem 'SystemTimer', '1.2.3', :platforms => :ruby_18
 
+gem 'rest-client'
 # tags
 
 gem 'acts-as-taggable-on', '~> 2.2.2'
