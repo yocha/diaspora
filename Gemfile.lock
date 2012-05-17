@@ -589,7 +589,7 @@ DEPENDENCIES
   twitter (= 2.0.2)
   typhoeus
   uglifier
-  unicorn (~> 4.3.0)
+  unicorn
   webmock
   whenever
   will_paginate
