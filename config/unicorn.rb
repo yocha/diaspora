@@ -59,7 +59,7 @@
   ##worker.user(user, group)
 #end
 
-root = "/home/deployer/apps/diapora/current"
+root = "/home/deployer/apps/diaspora/current"
 working_directory root
 pid "#{root}/tmp/pids/unicorn.pid"
 stderr_path "#{root}/log/unicorn.log"
